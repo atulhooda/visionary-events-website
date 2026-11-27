@@ -7,7 +7,11 @@ python3 -m http.server 8000   # then visit http://localhost:8000
 ```
 
 ## Structure
-- `index.html` — single-page site: Hero slider · About · Services · Technical production · Selected events · Vision/Mission/Values · Founder · Gallery · Contact
+- `index.html` — home: Hero slider · About · Services · Technical production · Selected events · Vision/Mission/Values · Founder · Gallery · Contact
+- `services.html` — services overview, linking to one page per service:
+  - `corporate-events.html` · `weddings.html` · `social-events.html` · `technical-production.html` · `festivals-public-events.html`
+  - each has: hero, overview, offerings, process, "every event includes", a gallery of that category, other services, and the contact form (event type pre-selected)
+- Nav, footer and contact form are repeated in every page, so edit them in all files (or ask Claude to regenerate the service pages).
 - `assets/css/style.css` — all styles (brand colours in `:root`)
 - `assets/js/main.js` — preloader, hero slider, scroll reveals, parallax, horizontal work scroller, gallery + lightbox, contact form
 - `assets/img/gallery/{corporate,wedding,social,audiovisual}/` — 194 photos pulled from visionaryevents.in

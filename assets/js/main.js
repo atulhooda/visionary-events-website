@@ -22,7 +22,7 @@
   const preloader = $('#preloader');
   const bar = $('#preloaderBar');
   const count = $('#preloaderCount');
-  const heroImgs = ['social/image53', 'wedding/image18', 'corporate/image26', 'social/image46'].map(p => `assets/img/gallery/${p}.jpeg`);
+  const heroImgs = preloader ? ['social/image53', 'wedding/image18', 'corporate/image26', 'social/image46'].map(p => `assets/img/gallery/${p}.jpeg`) : [];
   let loaded = 0, shown = 0;
   const target = () => Math.min(100, (loaded / heroImgs.length) * 100);
   heroImgs.forEach(src => { const i = new Image(); i.onload = i.onerror = () => loaded++; i.src = src; });
@@ -31,7 +31,8 @@
   // dev helper: ?static skips the preloader and shows all reveals (used for screenshots)
   const STATIC = location.search.includes('static');
 
-  if (STATIC) { body.classList.add('is-static'); setTimeout(finishLoading, 0); } else (function tick(now) {
+  if (STATIC) body.classList.add('is-static');
+  if (STATIC || !preloader) setTimeout(finishLoading, 0); else (function tick(now) {
     const timeCap = Math.min(100, ((now - start) / MIN) * 100);
     shown += (Math.min(target(), timeCap) - shown) * 0.12;
     if (target() >= 100 && timeCap >= 100 && shown > 99.4) shown = 100;
@@ -43,11 +44,10 @@
   })(start);
 
   function finishLoading() {
-    preloader.classList.add('is-done');
     body.classList.remove('is-loading');
     body.classList.add('is-ready');
-    setTimeout(() => preloader.remove(), 1300);
-    setTimeout(() => setTitle(slides[0].word, true), STATIC ? 0 : 250);
+    if (preloader) { preloader.classList.add('is-done'); setTimeout(() => preloader.remove(), 1300); }
+    if (titleEl) setTimeout(() => setTitle(slides[0].word, true), STATIC ? 0 : 250);
     if (STATIC) setTimeout(() => {
       $$('.reveal, .words-reveal, .reveal-img, .m-item').forEach(el => el.classList.add('is-in'));
       const at = new URLSearchParams(location.search).get('at');
@@ -58,7 +58,7 @@
         const els = [...$('main').children, $('.footer')];
         const t = document.getElementById(at) || $('.' + at);
         for (const el of els) { if (el === t) break; el.style.display = 'none'; }
-        sizeWork();
+        if (work) sizeWork();
       }
       window.dispatchEvent(new Event('scroll'));
     }, 50);
@@ -129,15 +129,15 @@
 
   function startAutoplay() {
     clearInterval(autoplay);
-    if (reduceMotion) return;
+    if (reduceMotion || !slideEls.length) return;
     autoplay = setInterval(() => goTo(current + 1), 6500);
   }
   dots.forEach(d => d.addEventListener('click', () => { goTo(+d.dataset.i); startAutoplay(); }));
 
   // swipe on touch
   let tx = null;
-  $('#hero').addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
-  $('#hero').addEventListener('touchend', e => {
+  if (slideEls.length) $('#hero').addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
+  if (slideEls.length) $('#hero').addEventListener('touchend', e => {
     if (tx === null) return;
     const dx = e.changedTouches[0].clientX - tx;
     if (Math.abs(dx) > 50) { goTo(current + (dx < 0 ? 1 : -1)); startAutoplay(); }
@@ -221,17 +221,56 @@
   /* ---------------- HORIZONTAL WORK ---------------- */
   const work = $('#work');
   const track = $('#workTrack');
-  let workDist = 0;
-  function sizeWork() {
-    if (innerWidth <= 900) { work.style.height = ''; track.style.transform = ''; workDist = 0; return; }
-    workDist = Math.max(0, track.scrollWidth - innerWidth);
-    work.style.height = (innerHeight + workDist) + 'px';
+  // A normal carousel: page scroll stays vertical; cards move with the
+  // arrow buttons, swipe/trackpad, or click-and-drag on desktop.
+  function sizeWork() { if (work) updateWork(); }
+  function scrollWork() {}
+  function updateWork() {
+    const cards = $$('.work-card', track);
+    const max = track.scrollWidth - track.clientWidth;
+    const p = max > 0 ? track.scrollLeft / max : 0;
+    const visible = Math.max(1, Math.round(track.clientWidth / (cards[0].offsetWidth + 24)));
+    $('#workBar').style.transform = `scaleX(${Math.min(1, visible / cards.length + p * (1 - visible / cards.length))})`;
+    const idx = Math.min(cards.length, Math.round(p * (cards.length - visible)) + 1);
+    $('#workCount').textContent = `${String(idx).padStart(2, '0')} / ${String(cards.length).padStart(2, '0')}`;
+    $('#workPrev').disabled = track.scrollLeft < 4;
+    $('#workNext').disabled = track.scrollLeft > max - 4;
   }
-  function scrollWork() {
-    if (!workDist) return;
-    const r = work.getBoundingClientRect();
-    const p = Math.min(1, Math.max(0, -r.top / (r.height - innerHeight)));
-    track.style.transform = `translate3d(${-p * workDist}px,0,0)`;
+  if (work) {
+    const step = () => { const c = $('.work-card', track); return c.offsetWidth + 24; };
+    $('#workPrev').addEventListener('click', () => track.scrollBy({ left: -step(), behavior: 'smooth' }));
+    $('#workNext').addEventListener('click', () => track.scrollBy({ left: step(), behavior: 'smooth' }));
+    track.addEventListener('scroll', () => requestAnimationFrame(updateWork), { passive: true });
+    track.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight') track.scrollBy({ left: step(), behavior: 'smooth' });
+      if (e.key === 'ArrowLeft') track.scrollBy({ left: -step(), behavior: 'smooth' });
+    });
+    track.tabIndex = 0;
+
+    // click-and-drag with a mouse (touch devices already swipe natively)
+    let down = false, startX = 0, startLeft = 0, moved = false;
+    track.addEventListener('pointerdown', e => {
+      if (e.pointerType !== 'mouse') return;
+      down = true; moved = false; startX = e.clientX; startLeft = track.scrollLeft;
+    });
+    window.addEventListener('pointermove', e => {
+      if (!down) return;
+      const dx = e.clientX - startX;
+      if (!moved && Math.abs(dx) > 5) { moved = true; track.classList.add('is-dragging'); }
+      if (moved) track.scrollLeft = startLeft - dx;
+    });
+    window.addEventListener('pointerup', () => {
+      if (!down) return;
+      down = false;
+      if (moved) {
+        // snap to the nearest card after the drag
+        const s = step();
+        const target = Math.round(track.scrollLeft / s) * s;
+        track.classList.remove('is-dragging');
+        track.scrollTo({ left: target, behavior: 'smooth' });
+      }
+    });
+    updateWork();
   }
 
   /* ---------------- RAF SCROLL LOOP ---------------- */
@@ -277,7 +316,7 @@
     clearInterval(prodTimer);
     if (e.isIntersecting && !reduceMotion) prodTimer = setInterval(() => setProd((prodIdx + 1) % prodItems.length), 3800);
   }, { threshold: .4 });
-  prodIO.observe($('.prod'));
+  if (prodItems.length) prodIO.observe($('.prod'));
 
   /* ---------------- GALLERY ---------------- */
   const counts = { corporate: 51, wedding: 38, social: 56, audiovisual: 50 };
@@ -288,16 +327,18 @@
     data[c] = [];
     for (let i = 1; i <= counts[c]; i++) if (!(skip[c] || []).includes(i)) data[c].push({ src: `assets/img/gallery/${c}/image${i}.jpeg`, cat: c });
   });
+  const masonry = $('#masonry');
+  // a page can show a fixed subset: data-set="wedding/1,social/14,..."
+  if (masonry && masonry.dataset.set) data.set = masonry.dataset.set.split(',').map(t => { const [c, n] = t.trim().split('/'); return { src: `assets/img/gallery/${c}/image${n}.jpeg`, cat: c }; });
   // "All": deterministic shuffle so similar consecutive shots don't cluster
   data.all = [...data.wedding, ...data.corporate, ...data.social, ...data.audiovisual];
   let seed = 7;
   const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (let i = data.all.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [data.all[i], data.all[j]] = [data.all[j], data.all[i]]; }
 
-  const masonry = $('#masonry');
   const loadMoreBtn = $('#loadMore');
   const PAGE = 16;
-  let activeCat = 'all', shownCount = 0;
+  let activeCat = masonry && masonry.dataset.set ? 'set' : 'all', shownCount = 0;
   const galIO = new IntersectionObserver(entries => {
     entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('is-in'); galIO.unobserve(e.target); } });
   }, { rootMargin: '0px 0px -5% 0px' });
@@ -330,11 +371,10 @@
     $$('.filter').forEach(x => x.classList.toggle('is-active', x === b));
     setCat(b.dataset.cat);
   }));
-  loadMoreBtn.addEventListener('click', renderMore);
-  renderMore();
+  if (masonry) { loadMoreBtn.addEventListener('click', renderMore); renderMore(); }
 
   // lightbox
-  const lb = $('#lightbox'), lbImg = $('#lbImg'), lbCap = $('#lbCap');
+  const lb = $('#lightbox') || document.createElement('div'), lbImg = $('#lbImg'), lbCap = $('#lbCap');
   let lbIdx = 0;
   function showLb(i) {
     const list = data[activeCat];
@@ -349,9 +389,11 @@
   }
   function openLb(i) { showLb(i); lb.classList.add('is-open'); lb.setAttribute('aria-hidden', 'false'); body.classList.add('lb-open'); }
   function closeLb() { lb.classList.remove('is-open'); lb.setAttribute('aria-hidden', 'true'); body.classList.remove('lb-open'); }
-  $('.lb__close').addEventListener('click', closeLb);
-  $('.lb__prev').addEventListener('click', () => showLb(lbIdx - 1));
-  $('.lb__next').addEventListener('click', () => showLb(lbIdx + 1));
+  if (lbImg) {
+    $('.lb__close').addEventListener('click', closeLb);
+    $('.lb__prev').addEventListener('click', () => showLb(lbIdx - 1));
+    $('.lb__next').addEventListener('click', () => showLb(lbIdx + 1));
+  }
   lb.addEventListener('click', e => { if (e.target === lb) closeLb(); });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { closeLb(); toggleMenu(false); }
@@ -367,14 +409,12 @@
   const form = $('#contactForm');
   const err = $('#formError');
   const success = $('#formSuccess');
-  // service panel arrows pre-select event type
-  $$('.panel__go').forEach(a => a.addEventListener('click', e => {
-    e.stopPropagation();
-    const r = form.querySelector(`input[data-key="${a.dataset.type}"]`);
-    if (r) r.checked = true;
-  }));
+  // pre-select event type from the page (body data-service) or ?type= in the URL
+  const preType = new URLSearchParams(location.search).get('type') || body.dataset.service;
+  if (form && preType) { const r = form.querySelector(`input[data-key="${preType}"]`); if (r) r.checked = true; }
+  $$('.panel__go').forEach(a => a.addEventListener('click', e => e.stopPropagation()));
 
-  form.addEventListener('submit', e => {
+  if (form) form.addEventListener('submit', e => {
     e.preventDefault();
     const via = e.submitter?.dataset.via || 'email';
     const fd = new FormData(form);
@@ -419,7 +459,10 @@
   const cursor = $('#cursor');
   function bindCursor(el, mode) {
     if (!finePointer) return;
-    el.addEventListener('mouseenter', () => cursor.classList.add(mode === 'view' ? 'is-view' : 'is-hover'));
+    el.addEventListener('mouseenter', () => {
+      cursor.classList.add(mode === 'hover' ? 'is-hover' : 'is-view');
+      cursor.firstElementChild.textContent = mode === 'drag' ? 'Drag' : 'View';
+    });
     el.addEventListener('mouseleave', () => cursor.classList.remove('is-view', 'is-hover'));
   }
   if (finePointer && !reduceMotion) {
@@ -433,7 +476,8 @@
       requestAnimationFrame(loop);
     })();
     $$('a, button, .panel, .prod__item, label').forEach(el => bindCursor(el, 'hover'));
-    $$('.work-card, .intro__img').forEach(el => bindCursor(el, 'view'));
+    $$('.intro__img').forEach(el => bindCursor(el, 'view'));
+    $$('.work-card').forEach(el => bindCursor(el, 'drag'));
 
     $$('.magnetic').forEach(el => {
       el.addEventListener('mousemove', e => {
@@ -446,5 +490,5 @@
     });
   }
 
-  $('#year').textContent = new Date().getFullYear();
+  if ($('#year')) $('#year').textContent = new Date().getFullYear();
 })();
